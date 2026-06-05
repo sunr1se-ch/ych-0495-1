@@ -37,9 +37,27 @@ export default function DashboardApp(props: Props) {
   const [timeline, setTimeline] = useState<TimelineData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hypotheticalReadings, setHypotheticalReadings] = useState<ReadingInput[]>([]);
+  const [hypotheticalReadings, setHypotheticalReadings] = useState<ReadingInput[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = window.sessionStorage.getItem("hypotheticalReadings");
+        return stored ? JSON.parse(stored) : [];
+      } catch (_e) {
+        return [];
+      }
+    }
+    return [];
+  });
   const [inWindow, setInWindow] = useState(props.initialInWindow);
   const [suggestion, setSuggestion] = useState(props.initialSuggestion);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem("hypotheticalReadings", JSON.stringify(hypotheticalReadings));
+    } catch (_e) {
+      // 忽略存储错误
+    }
+  }, [hypotheticalReadings]);
 
   const fetchTimeline = useCallback(async (batch: string, hypo: ReadingInput[] = []) => {
     setLoading(true);
