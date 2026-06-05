@@ -7,3 +7,10 @@ node_modules/
 .env.*
 fresh.gen.ts
 _fresh/
+
+# Build / temp artifacts
+temp_chunk-*.js
+*-chunk.js
+island-bundle.js
+dashboard.html
+timeline_test.json

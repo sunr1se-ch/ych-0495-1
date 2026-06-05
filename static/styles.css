@@ -205,6 +205,17 @@ button.secondary:hover {
   border-left-color: var(--text-muted);
 }
 
+.harvest-item.selected {
+  background: #dcfce7;
+  border-left-color: var(--success);
+  box-shadow: 0 0 0 2px var(--success);
+}
+
+.harvest-item.closed.selected {
+  background: #dcfce7;
+  border-left-color: var(--success);
+}
+
 .harvest-date {
   font-weight: 600;
   color: var(--primary-dark);

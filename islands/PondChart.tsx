@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "preact/hooks";
-import type { PondCode, PondReading, HarvestWindow } from "../utils/types.ts";
+import type { PondCode, PondReading, HarvestWindow, ReadingInput } from "../utils/types.ts";
 
 interface PondChartProps {
   timeline: {
@@ -7,6 +7,9 @@ interface PondChartProps {
     harvest_windows: HarvestWindow[];
     in_window: boolean;
   };
+  hypotheticalReadings: ReadingInput[];
+  zoomRange: { start: string; end: string } | null;
+  onResetZoom: () => void;
 }
 
 const POND_COLORS: Record<PondCode, string> = {
@@ -23,7 +26,73 @@ const POND_STYLES: Record<PondCode, { line: string; dash?: number[] }> = {
   D: { line: "#ef4444", dash: [5, 5] },
 };
 
-export default function PondChart({ timeline }: PondChartProps) {
+const formatDateShanghai = (date: Date | string): string => {
+  const ASIA_SHANGHAI_OFFSET = 8 * 60;
+  const parseShanghaiDate = (iso: string): Date => {
+    const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+    if (match) {
+      return new Date(
+        parseInt(match[1]),
+        parseInt(match[2]) - 1,
+        parseInt(match[3]),
+        parseInt(match[4]),
+        parseInt(match[5]),
+        parseInt(match[6])
+      );
+    }
+    const d = new Date(iso);
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    return new Date(utc + ASIA_SHANGHAI_OFFSET * 60000);
+  };
+  const d = typeof date === "string" ? parseShanghaiDate(date) : date;
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const isHypotheticalPoint = (
+  pondCode: PondCode,
+  reading: PondReading,
+  hypotheticalReadings: ReadingInput[]
+): boolean => {
+  const readingDate = formatDateShanghai(reading.date);
+  return hypotheticalReadings.some((h) => {
+    const hypoDate = formatDateShanghai(h.measured_at);
+    return (
+      h.pond_code === pondCode &&
+      hypoDate === readingDate &&
+      Math.abs(h.baume_deg - reading.baume_deg) < 0.001 &&
+      Math.abs(h.level_cm - reading.level_cm) < 0.001
+    );
+  });
+};
+
+const drawDiamond = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+  filled: boolean
+) => {
+  ctx.beginPath();
+  ctx.moveTo(x, y - size);
+  ctx.lineTo(x + size, y);
+  ctx.lineTo(x, y + size);
+  ctx.lineTo(x - size, y);
+  ctx.closePath();
+  if (filled) {
+    ctx.fillStyle = color;
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+};
+
+export default function PondChart({ timeline, hypotheticalReadings, zoomRange, onResetZoom }: PondChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -62,12 +131,28 @@ export default function PondChart({ timeline }: PondChartProps) {
       (["A", "B", "C", "D"] as PondCode[]).forEach((code) => {
         timeline.ponds[code]?.forEach((r) => allDates.add(r.date));
       });
-      const sortedDates = Array.from(allDates).sort();
+      let sortedDates = Array.from(allDates).sort();
+
+      if (zoomRange) {
+        sortedDates = sortedDates.filter(
+          (d) => d >= zoomRange.start && d <= zoomRange.end
+        );
+      }
 
       if (sortedDates.length === 0) return;
 
       const xScale = (i: number) =>
         padding.left + (i / (sortedDates.length - 1 || 1)) * chartWidth;
+
+      const getDateX = (dateStr: string): number | null => {
+        const idx = sortedDates.indexOf(dateStr);
+        if (idx === -1) {
+          if (dateStr < sortedDates[0]) return padding.left;
+          if (dateStr > sortedDates[sortedDates.length - 1]) return padding.left + chartWidth;
+          return null;
+        }
+        return xScale(idx);
+      };
 
       const baumeMin = 0;
       const baumeMax = 40;
@@ -82,6 +167,46 @@ export default function PondChart({ timeline }: PondChartProps) {
       const levelMax = Math.max(...allLevels, 100) + 10;
       const levelScale = (v: number) =>
         padding.top + chartHeight - ((v - levelMin) / (levelMax - levelMin)) * chartHeight;
+
+      const getLastDataDate = (): string => {
+        const allReadingDates: string[] = [];
+        (["A", "B", "C", "D"] as PondCode[]).forEach((code) => {
+          timeline.ponds[code]?.forEach((r) => allReadingDates.push(r.date));
+        });
+        return allReadingDates.sort().reverse()[0] || sortedDates[sortedDates.length - 1];
+      };
+
+      const lastDataDate = getLastDataDate();
+
+      timeline.harvest_windows.forEach((window) => {
+        const startDate = formatDateShanghai(window.opened_at);
+        const endDate = window.closed_at
+          ? formatDateShanghai(window.closed_at)
+          : lastDataDate;
+
+        const startX = getDateX(startDate);
+        const endX = getDateX(endDate);
+
+        if (startX !== null && endX !== null && startX < endX) {
+          ctx.fillStyle = "rgba(16, 185, 129, 0.15)";
+          ctx.fillRect(
+            startX,
+            padding.top,
+            endX - startX,
+            chartHeight
+          );
+          ctx.strokeStyle = "rgba(16, 185, 129, 0.4)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(startX, padding.top);
+          ctx.lineTo(startX, padding.top + chartHeight);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(endX, padding.top);
+          ctx.lineTo(endX, padding.top + chartHeight);
+          ctx.stroke();
+        }
+      });
 
       ctx.strokeStyle = "#e2e8f0";
       ctx.lineWidth = 1;
@@ -139,34 +264,49 @@ export default function PondChart({ timeline }: PondChartProps) {
 
         const style = POND_STYLES[code];
 
-        ctx.strokeStyle = style.line;
-        ctx.lineWidth = 2;
-        ctx.setLineDash(style.dash || []);
-        ctx.beginPath();
+        for (let i = 1; i < readings.length; i++) {
+          const prevR = readings[i - 1];
+          const currR = readings[i];
+          const prevIdx = sortedDates.indexOf(prevR.date);
+          const currIdx = sortedDates.indexOf(currR.date);
+          if (prevIdx === -1 || currIdx === -1) continue;
 
-        readings.forEach((r, i) => {
-          const dateIndex = sortedDates.indexOf(r.date);
-          if (dateIndex === -1) return;
-          const x = xScale(dateIndex);
-          const y = baumeScale(r.baume_deg);
-          if (i === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
-        });
-        ctx.stroke();
+          const prevIsHypo = isHypotheticalPoint(code, prevR, hypotheticalReadings);
+          const currIsHypo = isHypotheticalPoint(code, currR, hypotheticalReadings);
+          const segmentIsHypo = prevIsHypo || currIsHypo;
+
+          const x1 = xScale(prevIdx);
+          const y1 = baumeScale(prevR.baume_deg);
+          const x2 = xScale(currIdx);
+          const y2 = baumeScale(currR.baume_deg);
+
+          ctx.strokeStyle = style.line;
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = segmentIsHypo ? 0.3 : 1;
+          ctx.setLineDash(style.dash || []);
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        }
         ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
 
         readings.forEach((r) => {
           const dateIndex = sortedDates.indexOf(r.date);
           if (dateIndex === -1) return;
           const x = xScale(dateIndex);
           const y = baumeScale(r.baume_deg);
-          ctx.fillStyle = style.line;
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
-          ctx.fill();
+          const isHypo = isHypotheticalPoint(code, r, hypotheticalReadings);
+
+          if (isHypo) {
+            drawDiamond(ctx, x, y, 5, style.line, false);
+          } else {
+            ctx.fillStyle = style.line;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
         });
       });
 
@@ -174,24 +314,31 @@ export default function PondChart({ timeline }: PondChartProps) {
         const readings = timeline.ponds[code];
         if (!readings || readings.length === 0) return;
 
-        ctx.strokeStyle = POND_COLORS[code];
-        ctx.lineWidth = 1.5;
-        ctx.globalAlpha = 0.4;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
+        for (let i = 1; i < readings.length; i++) {
+          const prevR = readings[i - 1];
+          const currR = readings[i];
+          const prevIdx = sortedDates.indexOf(prevR.date);
+          const currIdx = sortedDates.indexOf(currR.date);
+          if (prevIdx === -1 || currIdx === -1) continue;
 
-        readings.forEach((r, i) => {
-          const dateIndex = sortedDates.indexOf(r.date);
-          if (dateIndex === -1) return;
-          const x = xScale(dateIndex);
-          const y = levelScale(r.level_cm);
-          if (i === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
-        });
-        ctx.stroke();
+          const prevIsHypo = isHypotheticalPoint(code, prevR, hypotheticalReadings);
+          const currIsHypo = isHypotheticalPoint(code, currR, hypotheticalReadings);
+          const segmentIsHypo = prevIsHypo || currIsHypo;
+
+          const x1 = xScale(prevIdx);
+          const y1 = levelScale(prevR.level_cm);
+          const x2 = xScale(currIdx);
+          const y2 = levelScale(currR.level_cm);
+
+          ctx.strokeStyle = POND_COLORS[code];
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = segmentIsHypo ? 0.15 : 0.4;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        }
         ctx.setLineDash([]);
         ctx.globalAlpha = 1;
       });
@@ -218,11 +365,20 @@ export default function PondChart({ timeline }: PondChartProps) {
     return () => {
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [timeline]);
+  }, [timeline, zoomRange, hypotheticalReadings]);
 
   return (
-    <div ref={containerRef} class="chart-container">
-      <canvas ref={canvasRef}></canvas>
+    <div>
+      {zoomRange && (
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 0.5rem;">
+          <button class="secondary" onClick={onResetZoom} style="padding: 0.25rem 0.75rem; font-size: 0.75rem;">
+            重置视口
+          </button>
+        </div>
+      )}
+      <div ref={containerRef} class="chart-container">
+        <canvas ref={canvasRef}></canvas>
+      </div>
     </div>
   );
 }

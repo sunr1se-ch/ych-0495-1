@@ -50,6 +50,8 @@ export default function DashboardApp(props: Props) {
   });
   const [inWindow, setInWindow] = useState(props.initialInWindow);
   const [suggestion, setSuggestion] = useState(props.initialSuggestion);
+  const [selectedWindowId, setSelectedWindowId] = useState<number | null>(null);
+  const [zoomRange, setZoomRange] = useState<{ start: string; end: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -108,6 +110,64 @@ export default function DashboardApp(props: Props) {
 
   const handleClearHypothetical = () => {
     setHypotheticalReadings([]);
+  };
+
+  const formatDateShanghai = (date: Date | string): string => {
+    const ASIA_SHANGHAI_OFFSET = 8 * 60;
+    const parseShanghaiDate = (iso: string): Date => {
+      const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+      if (match) {
+        return new Date(
+          parseInt(match[1]),
+          parseInt(match[2]) - 1,
+          parseInt(match[3]),
+          parseInt(match[4]),
+          parseInt(match[5]),
+          parseInt(match[6])
+        );
+      }
+      const d = new Date(iso);
+      const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+      return new Date(utc + ASIA_SHANGHAI_OFFSET * 60000);
+    };
+    const d = typeof date === "string" ? parseShanghaiDate(date) : date;
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const addDays = (dateStr: string, days: number): string => {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + days);
+    return formatDateShanghai(d);
+  };
+
+  const getLastDataDate = (): string => {
+    if (!timeline) return formatDateShanghai(new Date());
+    const allReadingDates: string[] = [];
+    (["A", "B", "C", "D"] as PondCode[]).forEach((code) => {
+      timeline.ponds[code]?.forEach((r) => allReadingDates.push(r.date));
+    });
+    return allReadingDates.sort().reverse()[0] || formatDateShanghai(new Date());
+  };
+
+  const handleSelectWindow = (window: HarvestWindow) => {
+    const startDate = formatDateShanghai(window.opened_at);
+    const endDate = window.closed_at
+      ? formatDateShanghai(window.closed_at)
+      : getLastDataDate();
+
+    const zoomStart = addDays(startDate, -2);
+    const zoomEnd = addDays(endDate, 2);
+
+    setSelectedWindowId(window.id);
+    setZoomRange({ start: zoomStart, end: zoomEnd });
+  };
+
+  const handleResetZoom = () => {
+    setSelectedWindowId(null);
+    setZoomRange(null);
   };
 
   const getLatestReading = (code: PondCode) => {
@@ -214,13 +274,26 @@ export default function DashboardApp(props: Props) {
                 <span class="legend-dot d"></span>
                 D池
               </div>
+              <div class="legend-item" style="margin-left: auto;">
+                <span class="legend-dot" style="background: #64748b; border-radius: 50%;"></span>
+                实测数据
+              </div>
+              <div class="legend-item">
+                <span style="width: 12px; height: 12px; display: inline-block; border: 2px solid #64748b; transform: rotate(45deg);"></span>
+                假设数据
+              </div>
             </div>
             {loading ? (
               <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 加载中...
               </div>
             ) : timeline ? (
-              <PondChart timeline={timeline} />
+              <PondChart
+                timeline={timeline}
+                hypotheticalReadings={hypotheticalReadings}
+                zoomRange={zoomRange}
+                onResetZoom={handleResetZoom}
+              />
             ) : (
               <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 暂无数据，请先录入读数
@@ -267,7 +340,11 @@ export default function DashboardApp(props: Props) {
           <div class="card">
             <h2>历史收卤窗口</h2>
             {timeline && timeline.harvest_windows.length > 0 ? (
-              <HarvestWindowList windows={timeline.harvest_windows} />
+              <HarvestWindowList
+                windows={timeline.harvest_windows}
+                selectedWindowId={selectedWindowId}
+                onSelect={handleSelectWindow}
+              />
             ) : (
               <div style="color: var(--text-muted); font-size: 0.875rem;">
                 暂无历史收卤记录

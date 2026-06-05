@@ -2,9 +2,11 @@ import type { HarvestWindow } from "../utils/types.ts";
 
 interface HarvestWindowListProps {
   windows: HarvestWindow[];
+  selectedWindowId: number | null;
+  onSelect: (window: HarvestWindow) => void;
 }
 
-export default function HarvestWindowList({ windows }: HarvestWindowListProps) {
+export default function HarvestWindowList({ windows, selectedWindowId, onSelect }: HarvestWindowListProps) {
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleString("zh-CN", {
@@ -36,7 +38,9 @@ export default function HarvestWindowList({ windows }: HarvestWindowListProps) {
       {sortedWindows.map((window) => (
         <div
           key={window.id}
-          class={`harvest-item ${window.closed_at ? "closed" : ""}`}
+          class={`harvest-item ${window.closed_at ? "closed" : ""} ${selectedWindowId === window.id ? "selected" : ""}`}
+          onClick={() => onSelect(window)}
+          style="cursor: pointer;"
         >
           <div style="display: flex; justify-content: space-between; align-items: flex-start;">
             <div>
