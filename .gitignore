@@ -1,0 +1,9 @@
+data/
+*.db
+*.db-journal
+node_modules/
+.DS_Store
+.env
+.env.*
+fresh.gen.ts
+_fresh/

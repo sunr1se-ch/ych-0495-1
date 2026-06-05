@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DENO_ENV=production
+      - DB_PATH=/app/data/saltworks.db
+    restart: unless-stopped
